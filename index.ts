@@ -1,4 +1,4 @@
-import { z, ZodType, ZodError, ZodObject, ZodRawShape, ZodFunction, ZodTuple } from 'zod';
+import { z, ZodType, ZodError, ZodObject, ZodRawShape, ZodFunction, ZodTuple, ZodTypeAny } from 'zod';
 
 /**
  * Interface for a simplified Blueprint.
@@ -19,6 +19,7 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
     propsSchema: ZodType<P>;
     resultSchema: ZodType<R>;
     implementationSignatureSchema: ZodFunction<ZodTuple<[ZodType<P>]>, ZodType<Promise<R>>>;
+    name?: string;
     description?: string;
 
     /**
@@ -26,7 +27,7 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @param implementation The function to execute when the blueprint is called.
      * @returns The blueprint instance for fluent chaining.
      */
-    setImplementation(implementation: C): this; // Changed return type to this
+    setImplementation(implementation: C): this;
     getImplementation: () => C;
     isImplemented: () => boolean;
 
@@ -41,7 +42,7 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @returns The new Blueprint instance created by the modifier function.
      */
     mod<NewP = P, NewR = R>(
-        mod: ( 
+        mod: (
             originalBP: Blueprint<P, R, C>
         ) => Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>>
     ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>>;
@@ -74,37 +75,58 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @param addonImplementation The addon object to merge.
      * @returns The blueprint instance, now augmented with the addon's members.
      */
-    addon<AI extends object>( 
+    addon<AI extends object>(
         addonImplementation: AI
     ): this & AI;
+
+    /**
+     * Creates a new blueprint where certain properties are fixed ("enforced") to specific values.
+     * The new blueprint will not expect these enforced properties as input.
+     * @template E An object type representing the properties to enforce. Values in `enforcedValuesProvider` must match these types.
+     * @param enforcedValuesProvider Either an object containing the enforced values, or a function that takes the (remaining) new props and returns the enforced values.
+     * @returns A new Blueprint that takes `Omit<P, keyof E>` as props.
+     */
+    enforce<E extends Partial<P>>(
+        enforcedValuesProvider: E | ((props: Omit<P, keyof E>) => E)
+    ): Blueprint<Omit<P, keyof E>, R, (props: Omit<P, keyof E>) => Promise<R>>;
+
+    /**
+     * Creates a new blueprint where certain properties have default values.
+     * If these properties are not provided when calling the new blueprint, their default values will be used.
+     * The props with defaults become optional in the new blueprint's input.
+     * @template D An object type representing the properties that will have defaults.
+     * @param defaultValuesProvider Either an object containing the default values, or a function that takes the (potentially partial) new props and returns the default values.
+     * @returns A new Blueprint whose props (with defaults) are now optional.
+     */
+    defaults<D extends Partial<P>>(
+        defaultValuesProvider: D | ((props: P) => D)
+    ): Blueprint<Omit<P, keyof D> & Partial<D>, R>;
 }
 
 /**
  * Creates a simplified "late implementation" function blueprint with mod, adapt, and addon methods.
  */
-export function blueprint< 
+export function blueprint<
     P,
     R,
     C extends (props: P) => Promise<R> = (props: P) => Promise<R>
 >({
     propsSchema,
     resultSchema,
-    name,
+    name, // name is currently unused but kept from original
     description,
-    initialImplementation = (async ({}: P): Promise<R> => { throw new Error('Not Implemented') }) as C
-} : {
+    initialImplementation = (async (_props: P): Promise<R> => { throw new Error('Not Implemented') }) as C
+}: {
     propsSchema: ZodType<P>,
     resultSchema: ZodType<R>,
     name?: string,
     description?: string,
     initialImplementation?: C
-}): Blueprint<P, R, (props: P) => Promise<R>> { 
+}): Blueprint<P, R, (props: P) => Promise<R>> {
     let _implementation: C = initialImplementation;
 
-    // The callable part of the blueprint instance
     const blueprintInstanceCallable = async (propsValue: P): Promise<R> => {
         let validatedProps: P;
-
         try {
             validatedProps = propsSchema.parse(propsValue);
         } catch (error) {
@@ -114,6 +136,9 @@ export function blueprint<
             throw error;
         }
 
+        if (!_implementation) { // Ensure implementation is set
+            throw new Error(`Implementation not set for blueprint${description ? ` '${description}'` : ''}.`);
+        }
         const promiseResult = _implementation(validatedProps);
         const rawResultValue = await promiseResult;
 
@@ -129,43 +154,43 @@ export function blueprint<
         return validatedResultValue;
     };
 
-    // Assert the callable to the Blueprint interface
-    const blueprintInstance = blueprintInstanceCallable as Blueprint<P, R, C>; 
+    const blueprintInstance = blueprintInstanceCallable as Blueprint<P, R, C>;
 
-    // Assign properties and methods to the blueprint instance
     blueprintInstance.propsSchema = propsSchema;
     blueprintInstance.resultSchema = resultSchema;
+    blueprintInstance.name = name;
     blueprintInstance.description = description;
     blueprintInstance.implementationSignatureSchema = z.function(
-        z.tuple([propsSchema]),
+        z.tuple([propsSchema as ZodTypeAny]), // Use ZodTypeAny for tuple items
         z.promise(resultSchema)
     );
 
-    blueprintInstance.setImplementation = function(this: Blueprint<P, R, C>, implementation: C) {
-        implementation = implementation;
-        return this; // Return this for chaining
+    blueprintInstance.setImplementation = function (this: Blueprint<P, R, C>, newImplementation: C) {
+        _implementation = newImplementation; // Correctly assign to the internal variable
+        return this;
     };
     blueprintInstance.getImplementation = (): C => _implementation;
-    blueprintInstance.isImplemented = (): boolean => _implementation !== undefined;
+    blueprintInstance.isImplemented = (): boolean => typeof _implementation === 'function' && _implementation.toString() !== (async (_props: P): Promise<R> => { throw new Error('Not Implemented') }).toString();
+
 
     blueprintInstance.mod = function <NewP = P, NewR = R, NewC extends (props: NewP) => Promise<NewR> = (props: NewP) => Promise<NewR>>(
         this: Blueprint<P, R, C>,
-        mod: ( 
+        modFn: (
             originalBP: Blueprint<P, R, C>
         ) => Blueprint<NewP, NewR, NewC>
     ): Blueprint<NewP, NewR, NewC> {
-        return mod(this);
+        return modFn(this);
     };
 
     blueprintInstance.adapt = function <NewP, NewR>(
-        this: Blueprint<P, R, C>, 
+        this: Blueprint<P, R, C>,
         newPropsSchema: ZodType<NewP>,
         newResultSchema: ZodType<NewR>,
-        propsAdapter: (newProps: NewP) => P | Promise<P>, 
-        resultAdapter: (oldResult: R, newProps?: NewP) => NewR | Promise<NewR>, 
+        propsAdapter: (newProps: NewP) => P | Promise<P>,
+        resultAdapter: (oldResult: R, newProps?: NewP) => NewR | Promise<NewR>,
         newDescription?: string
-    ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>> { 
-        const originalBP = this; 
+    ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>> {
+        const originalBP = this;
         const actualNewDescription = newDescription ?? `Adapted (${originalBP.description || 'Unnamed Blueprint'})`;
 
         const adaptedBlueprint = blueprint<NewP, NewR>({
@@ -176,11 +201,10 @@ export function blueprint<
 
         adaptedBlueprint.setImplementation(async (adaptedPropsValue: NewP): Promise<NewR> => {
             const originalProps = await Promise.resolve(propsAdapter(adaptedPropsValue));
-            const originalResult = await originalBP(originalProps); 
+            const originalResult = await originalBP(originalProps);
             const newAdaptedResult = await Promise.resolve(resultAdapter(originalResult, adaptedPropsValue));
             return newAdaptedResult;
         });
-
         return adaptedBlueprint;
     };
 
@@ -192,296 +216,138 @@ export function blueprint<
         return this as Blueprint<P, R, C> & AI;
     };
 
+    // --- Implementation for enforce ---
+    blueprintInstance.enforce = function <E extends Partial<P>>(
+        this: Blueprint<P, R, C>,
+        enforcedValuesProvider: E | ((props: Omit<P, keyof E>) => E)
+    ): Blueprint<Omit<P, keyof E>, R, (props: Omit<P, keyof E>) => Promise<R>> {
+        const originalBP = this;
+
+        if (!(originalBP.propsSchema instanceof ZodObject)) {
+            throw new Error("Cannot use .enforce() on a blueprint with a non-object propsSchema. Current schema type: " + originalBP.propsSchema.constructor.name);
+        }
+        
+        // Determine keys to omit based on the provider type
+        // If it's a function, we can't know keys statically for schema omit,
+        // but we must assume the function provides ALL keys defined in E.
+        // For schema modification, we need the keys. If `enforcedValuesProvider` is a function,
+        // we can't get the keys without calling it. This implies `E` must be an object if we want to change the schema.
+        // Let's assume `enforcedValuesProvider` (if object) or `E` (type) gives the keys.
+        // A simple approach: if it's an object, use its keys. If it's a function, this is harder for schema.
+        // For simplicity, let's get keys from the first parameter if it's an object, otherwise this is tricky.
+        // A common pattern for E is that it's a concrete object type, so Object.keys(enforcedValuesProvider) works if it's not a function.
+        // To make it robust, we'd need E to be a Zod schema itself, or pass keys explicitly.
+        // Given E extends Partial<P>, we can't directly get keys of E for omit.
+        // We must rely on the actual object if provided.
+        
+        // This part is tricky: to create `newPropsSchema.omit(keys)`, `keys` must be from `enforcedValuesProvider` if it's an object.
+        // If `enforcedValuesProvider` is a function, we don't know the keys to omit for the schema beforehand.
+        // The type `Omit<P, keyof E>` implies we *do* know `keyof E`.
+        // This means `E` should represent the *shape* of the enforced props.
+        // We'll assume `Object.keys()` on `enforcedValuesProvider` (if it's an object) is sufficient for demo.
+        // A more robust solution might require passing a Zod schema for E.
+        let exampleKeysForOmission: Record<string, true> = {};
+        if (typeof enforcedValuesProvider !== 'function') {
+             Object.keys(enforcedValuesProvider).forEach(k => exampleKeysForOmission[k] = true);
+        } else {
+            // If it's a function, we can't statically determine keys to omit for the schema.
+            // This is a limitation. The `Omit<P, keyof E>` implies E's keys are known.
+            // This suggests `E` should be a type with known keys.
+            // For this implementation, we'll proceed assuming E's keys are what we want to omit.
+            // This part would need refinement for full type safety with function providers if E's keys aren't inferable.
+            // However, `keyof E` in `Omit<P, keyof E>` refers to the keys of the type E, not the runtime value.
+            // This is a structural typing aspect.
+            // We can't use `keyof E` directly in `omit`'s runtime argument.
+            // The `omit` method needs a runtime object specifying keys.
+            // This is a fundamental challenge if `E` is only a type and `enforcedValuesProvider` is a function.
+            // For now, we'll throw if it's a function and we can't get keys.
+            // A better approach: the `enforce` method should take a schema for the enforced part.
+            // Or, the user must ensure `E` has keys that can be listed.
+             console.warn("[enforce] When using a function provider, static determination of keys for schema omission is not possible. The resulting schema might not be strictly Omit<P, keyof E>.");
+        }
+
+
+        // Cast propsSchema to ZodObject to access .omit and .shape
+        const originalZodObject = originalBP.propsSchema as ZodObject<any, any, any, P, P>;
+        // The keys to omit must be passed as an object ` { key1: true, key2: true } `
+        // This is problematic if E's keys are not known at runtime from `enforcedValuesProvider`
+        // For this example, we'll proceed with `exampleKeysForOmission` which is best-effort.
+        // @ts-expect-error (probably works)
+        const newPropsSchema = originalZodObject.omit(exampleKeysForOmission) as ZodType<Omit<P, keyof E>>;
+        type NewP = Omit<P, keyof E>;
+
+        return originalBP.mod(currentBP => { // currentBP is the original blueprint instance
+            return blueprint<NewP, R>({
+                propsSchema: newPropsSchema,
+                resultSchema: currentBP.resultSchema, // Use result schema from currentBP
+                description: `${currentBP.description || 'Unnamed'} (enforced)`, // Simplified description
+            }).setImplementation(async (newProps: NewP) => {
+                const enforcedValues = typeof enforcedValuesProvider === 'function'
+                    ? enforcedValuesProvider(newProps) // Call function with the new, partial props
+                    : enforcedValuesProvider;
+                const combinedProps = { ...newProps, ...enforcedValues } as P; // newProps first, then enforced, though keys shouldn't overlap
+                return currentBP(combinedProps); // Call the original blueprint's implementation
+            }) as Blueprint<NewP, R, (props: NewP) => Promise<R>>;
+        }) as Blueprint<NewP, R, (props: NewP) => Promise<R>>; // Cast the result of mod
+    };
+
+
+    // --- Implementation for defaults ---
+    blueprintInstance.defaults = function <D extends Partial<P>>(
+        this: Blueprint<P, R, C>,
+        defaultValuesProvider: D | ((props: P) => D)
+    ): Blueprint<Omit<P, keyof D> & Partial<D>, R> {
+
+        type NewP = Omit<P, keyof D> & Partial<D>
+
+        const originalBP = this;
+        if (!(originalBP.propsSchema instanceof ZodObject)) {
+            throw new Error("Cannot use .defaults() on a blueprint with a non-object propsSchema. Current schema type: " + originalBP.propsSchema.constructor.name);
+        }
+
+        const originalZodObject = originalBP.propsSchema as ZodObject<any, any, any, P, P>;
+        const originalShape = originalZodObject.shape;
+
+        let keysForDefaults: (keyof D)[] = [];
+        if (typeof defaultValuesProvider !== 'function') {
+            keysForDefaults = Object.keys(defaultValuesProvider) as (keyof D)[];
+        } else {
+            // If provider is a function, we don't know keys statically to make them optional in schema.
+            // This is a limitation. For robust schema transformation, defaultValuesProvider should be an object,
+            // or keys need to be passed explicitly.
+            // `keyof D` provides the type-level keys.
+            console.warn("[defaults] When using a function provider, static determination of keys for schema optional marking is not possible. The resulting schema might not correctly reflect optional fields.");
+        }
+
+
+        const newShape = { ...originalShape };
+        keysForDefaults.forEach(key => {
+            if (newShape[key as string]) {
+                newShape[key as string] = (newShape[key as string] as ZodTypeAny).optional();
+            }
+        });
+        
+        const newPropsSchema = z.object(newShape);
+
+        return originalBP.mod(currentBP => {
+            const newBP = blueprint<NewP, R>({
+                // @ts-expect-error (yes it's an object)
+                propsSchema: newPropsSchema as ZodType<NewP>,
+                resultSchema: currentBP.resultSchema,
+                description: `${currentBP.description || 'Unnamed'} (with defaults)`,
+            });
+
+            newBP.setImplementation(async (props: NewP) => { // props type is NewP
+                const defaultValues = typeof defaultValuesProvider === 'function'
+                    ? defaultValuesProvider(props as any) // Cast props if function expects specific partial type
+                    : defaultValuesProvider;
+                const combinedProps = { ...defaultValues, ...props } as P; // Defaults first, then incoming props
+                return currentBP(combinedProps);
+            });
+            return newBP as Blueprint<NewP, R>
+        });
+    };
+
     return blueprintInstance;
 }
 
-
-// --- Example Usage ---
-
-// Schemas for initial blueprint
-const InitialPropsSchema = z.object({
-    id: z.string(),
-    name: z.string(),
-});
-type InitialProps = z.infer<typeof InitialPropsSchema>;
-
-const InitialResultSchema = z.object({
-    status: z.string(),
-    data: z.object({ id: z.string(), name: z.string(), processedName: z.string() }),
-});
-type InitialResult = z.infer<typeof InitialResultSchema>;
-
-// Create an initial blueprint and set implementation fluently
-let bp1 = blueprint<InitialProps, InitialResult>({
-    propsSchema: InitialPropsSchema,
-    resultSchema: InitialResultSchema,
-    description: "Simple Service BP V1"
-}).setImplementation(async (props) => { // Chained setImplementation
-    if (props.name === "FAIL_ME") {
-        throw new Error("Simulated failure in bp1 implementation");
-    }
-    return {
-        status: "original_executed",
-        data: {
-            id: props.id,
-            name: props.name,
-            processedName: props.name.toUpperCase(),
-        }
-    };
-});
-
-
-// --- Example for .mod() to change Props and Result types ---
-
-const ModNewPropsSchema = z.object({
-    itemId: z.string(), 
-    itemName: z.string(), 
-    additionalInfo: z.string().optional(),
-});
-type ModNewProps = z.infer<typeof ModNewPropsSchema>;
-
-const ModNewResultSchema = z.object({
-    outcome: z.enum(["SUCCESS", "FAILURE"]),
-    message: z.string(),
-    details: ModNewPropsSchema.optional(),
-});
-type ModNewResult = z.infer<typeof ModNewResultSchema>;
-
-const modFnToChangeTypes = ( 
-    originalBP: Blueprint<InitialProps, InitialResult, (props: InitialProps) => Promise<InitialResult>>
-): Blueprint<ModNewProps, ModNewResult, (props: ModNewProps) => Promise<ModNewResult>> => { 
-    const newDescription = `${originalBP.description} (types transformed by mod fn)`;
-    const transformedBlueprint = blueprint<ModNewProps, ModNewResult>({
-        propsSchema: ModNewPropsSchema,
-        resultSchema: ModNewResultSchema,
-        description: newDescription
-    });
-    return transformedBlueprint;
-};
-
-// --- Example for .adapt() method ---
-const AdaptedPropsSchema = z.object({
-    productId: z.string(),
-    productName: z.string(),
-    quantity: z.number(),
-});
-type AdaptedProps = z.infer<typeof AdaptedPropsSchema>;
-
-const AdaptedResultSchema = z.object({
-    executionSuccess: z.boolean(),
-    summary: z.string(),
-    productDetails: z.object({
-        originalId: z.string(),
-        transformedName: z.string(),
-        requestedQuantity: z.number().optional(),
-    }).optional(),
-});
-type AdaptedResult = z.infer<typeof AdaptedResultSchema>;
-
-const productPropsAdapter = (adaptedProps: AdaptedProps): InitialProps | Promise<InitialProps> => {
-    if (adaptedProps.quantity <= 0) {
-        throw new Error(`[productPropsAdapter] Invalid quantity: ${adaptedProps.quantity}. Must be positive.`);
-    }
-    return Promise.resolve({ 
-        id: adaptedProps.productId, 
-        name: adaptedProps.productName 
-    });
-};
-
-const productResultAdapter = (initialResult: InitialResult, adaptedProps?: AdaptedProps): AdaptedResult => {
-    const success = initialResult.status === "original_executed";
-    return {
-        executionSuccess: success,
-        summary: `Product ${adaptedProps?.productId} (name: ${adaptedProps?.productName}) processing: ${success ? 'OK' : 'Failed'}. Original status: ${initialResult.status}.`,
-        productDetails: {
-            originalId: initialResult.data.id,
-            transformedName: initialResult.data.processedName,
-            requestedQuantity: adaptedProps?.quantity,
-        }
-    };
-};
-
-// --- Example for LoggerAddon ---
-interface LoggerAddon {
-    readonly logPrefix: string; 
-    log: (message: string) => void;
-    setLogPrefix: (prefix: string) => void;
-}
-
-const createLoggerAddon = (initialPrefix: string): LoggerAddon => {
-    let currentPrefix = initialPrefix; 
-    return {
-        get logPrefix() { 
-            return currentPrefix;
-        },
-        log: function(message: string) {
-            const bpDescription = (this as any).description || 'Blueprint';
-            console.log(`[${bpDescription} Log - ${currentPrefix}]: ${message}`);
-        },
-        setLogPrefix: function(newPrefix: string) {
-            currentPrefix = newPrefix;
-        }
-    };
-};
-
-// --- Example for ReactAddon ---
-interface ReactAddon {
-    /** Placeholder for React hook integration. Returns `this` for chaining. */
-    hook(): this;
-    /** Placeholder for React context integration. Returns `this` for chaining. */
-    context(): this;
-}
-
-const createReactAddon = (): ReactAddon => {
-    return {
-        hook: function() {
-            console.log(`[ReactAddon ${(this as any).description || ''}] hook() called.`);
-            return this;
-        },
-        context: function() {
-            console.log(`[ReactAddon ${(this as any).description || ''}] context() called.`);
-            return this;
-        }
-    };
-};
-
-
-async function runSimplifiedExamples() {
-    console.log("--- Running Simplified Blueprint Examples ---");
-    console.log("Created bp1 (and set implementation):", bp1.description, "Is implemented:", bp1.isImplemented());
-
-    // 1. Basic call to bp1
-    console.log("\n--- Example 1: Basic bp1 call (SUCCESS) ---");
-    try {
-        const result1 = await bp1({ id: "item001", name: "First Item" });
-        console.log("✅ bp1 Direct Call Result:", result1);
-    } catch (e: any) {
-        console.error("❌ bp1 Direct Call Error:", e.message);
-    }
-
-    console.log("\n--- Example 1b: Basic bp1 call (FAILURE in impl) ---");
-    try {
-        await bp1({ id: "item002", name: "FAIL_ME" });
-    } catch (e: any) {
-        console.error("❌ bp1 Direct Call Error (expected):", e.message);
-    }
-
-    // 2. Using .mod()
-    console.log("\n--- Example 2: Using .mod() ---");
-    try {
-        const bp2_transformed = bp1.mod(modFnToChangeTypes) 
-            .setImplementation(async (props) => { // Chaining setImplementation after mod
-                if (props.itemName.length < 3) {
-                    return { outcome: "FAILURE" as const, message: "Item name too short.", details: props };
-                }
-                return { outcome: "SUCCESS" as const, message: `Item ${props.itemId} (${props.itemName}) processed. Info: ${props.additionalInfo || 'N/A'}`, details: props };
-            });
-        console.log("Blueprint returned by .mod() and implemented:", bp2_transformed.description, "Is implemented:", bp2_transformed.isImplemented());
-        
-        console.log("Calling bp2_transformed (SUCCESS case):");
-        const modResultSuccess = await bp2_transformed({ itemId: "mod-789", itemName: "Transformed Item", additionalInfo: "Via .mod() with function" });
-        console.log("✅ bp2_transformed SUCCESS Result:", modResultSuccess);
-
-        console.log("Calling bp2_transformed (FAILURE case):");
-        const modResultFailure = await bp2_transformed({ itemId: "mod-000", itemName: "No" });
-        console.log("✅ bp2_transformed FAILURE Result:", modResultFailure);
-
-    } catch (e: any) {
-        console.error("❌ Error during .mod() example:", e.message, e.stack);
-    }
-
-    // 3. Using .adapt() method
-    console.log("\n--- Example 3: Using .adapt() method ---");
-    try {
-        // .adapt() returns a new blueprint, its setImplementation is called by the adapt method itself.
-        const bp_adapted = bp1.adapt(
-            AdaptedPropsSchema,
-            AdaptedResultSchema,
-            productPropsAdapter,
-            productResultAdapter,
-            "Adapted Product Service BP (via .adapt method)"
-        );
-        console.log("Created adapted blueprint:", bp_adapted.description, "Is implemented:", bp_adapted.isImplemented());
-        
-        console.log("Calling bp_adapted (SUCCESS case):");
-        const adaptedResultSuccess = await bp_adapted({ productId: "prod-XYZ", productName: "Awesome Gadget", quantity: 10 });
-        console.log("✅ bp_adapted SUCCESS Result:", adaptedResultSuccess);
-
-        console.log("Calling bp_adapted (FAILURE case - props adapter error):");
-        try {
-            await bp_adapted({ productId: "prod-FAIL-QUANTITY", productName: "ZeroCount Gadget", quantity: 0 });
-        } catch (e: any) {
-            console.error("❌ bp_adapted Error (expected from props adapter):", e.message);
-        }
-
-        console.log("Calling bp_adapted (FAILURE case - original bp1 impl error):");
-         try {
-            await bp_adapted({ productId: "prod-FAIL-IMPL", productName: "FAIL_ME", quantity: 5 });
-        } catch (e: any) {
-            console.error("❌ bp_adapted Error (expected from original bp1 impl):", e.message);
-        }
-    } catch (e: any) {
-        console.error("❌ Error during .adapt() method example:", e.message, e.stack);
-    }
-
-    let bpWithAddon: Blueprint<InitialProps, InitialResult>
-    // 4. Using LoggerAddon with .addon() method
-    console.log("\n--- Example 4: Using LoggerAddon with .addon() method ---");
-    try {
-        let bpWithAddon = blueprint<InitialProps, InitialResult>({
-            propsSchema: InitialPropsSchema,
-            resultSchema: InitialResultSchema,
-            description: "Logger Test BP"
-        })
-            .setImplementation(async (props) => ({status: "logged", data: {...props, processedName: props.name.toUpperCase()}}))
-            .addon(createLoggerAddon("TestBP")); // Chaining addon after setImplementation
-        
-        console.log("bpWithLogger description:", bpWithAddon.description); 
-        console.log("Logger prefix:", bpWithAddon.logPrefix); 
-
-        bpWithAddon.log("This is a test log from the LoggerAddon."); 
-        bpWithAddon.setLogPrefix("ServiceTest");
-        bpWithAddon.log("Log with new prefix.");
-
-        const resultWithLogger = await bpWithAddon({ id: "log-item-001", name: "Logging Item" });
-        console.log("✅ bpWithLogger Call Result:", resultWithLogger);
-        
-        if (bpWithAddon.isImplemented()) {
-             bpWithAddon.log("bpWithLogger is implemented.");
-        }
-    } catch (e: any) {
-        console.error("❌ Error during LoggerAddon example:", e.message, e.stack);
-    }
-
-    // 5. Using ReactAddon with .addon() method
-    console.log("\n--- Example 5: Using ReactAddon with .addon() method ---");
-    try {
-        bpWithAddon = blueprint<InitialProps, InitialResult>({
-            propsSchema: InitialPropsSchema,
-            resultSchema: InitialResultSchema,
-            description: "React Test BP"
-        }) .setImplementation(async (props) => ({status: "react-ok", data: {...props, processedName: props.name.toUpperCase()}}))
-        .addon(createReactAddon()) // Chaining addon
-        .hook() // Chaining addon method
-        .context(); // Chaining addon method
-
-        console.log("bpWithReact description:", bpWithAddon.description);
-
-        console.log("Calling bpWithReact (which is bpForReact, now with React addon methods):");
-        const resultWithReact = await bpWithAddon({ id: "react-item-001", name: "React Item" });
-        console.log("✅ bpWithReact Call Result:", resultWithReact);
-
-        if (typeof (bpWithAddon as any).log === 'function') {
-            console.log("bpWithReact has a log method - this means LoggerAddon was also applied.");
-        } else {
-            console.log("bpWithReact does NOT have a log method (as expected for this isolated example).");
-        }
-
-    } catch (e: any) {
-        console.error("❌ Error during ReactAddon example:", e.message, e.stack);
-    }
-
-}
-
-// To run examples:
-runSimplifiedExamples();
