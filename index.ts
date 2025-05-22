@@ -27,7 +27,7 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @returns The blueprint instance for fluent chaining.
      */
     setImplementation(implementation: C): this; // Changed return type to this
-    getImplementation: () => C | undefined;
+    getImplementation: () => C;
     isImplemented: () => boolean;
 
     /**
@@ -84,21 +84,27 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
  */
 export function blueprint< 
     P,
-    R
->(
+    R,
+    C extends (props: P) => Promise<R> = (props: P) => Promise<R>
+>({
+    propsSchema,
+    resultSchema,
+    name,
+    description,
+    initialImplementation = (async ({}: P): Promise<R> => { throw new Error('Not Implemented') }) as C
+} : {
     propsSchema: ZodType<P>,
     resultSchema: ZodType<R>,
-    description?: string
-): Blueprint<P, R, (props: P) => Promise<R>> { 
-    type ActualImplementation = (props: P) => Promise<R>;
-    let _implementation: ActualImplementation | undefined = undefined;
+    name?: string,
+    description?: string,
+    initialImplementation?: C
+}): Blueprint<P, R, (props: P) => Promise<R>> { 
+    let _implementation: C = initialImplementation;
 
     // The callable part of the blueprint instance
     const blueprintInstanceCallable = async (propsValue: P): Promise<R> => {
-        if (!_implementation) {
-            throw new Error(`Blueprint${description ? ` '${description}'` : ''} has no implementation set.`);
-        }
         let validatedProps: P;
+
         try {
             validatedProps = propsSchema.parse(propsValue);
         } catch (error) {
@@ -124,7 +130,7 @@ export function blueprint<
     };
 
     // Assert the callable to the Blueprint interface
-    const blueprintInstance = blueprintInstanceCallable as Blueprint<P, R, ActualImplementation>; 
+    const blueprintInstance = blueprintInstanceCallable as Blueprint<P, R, C>; 
 
     // Assign properties and methods to the blueprint instance
     blueprintInstance.propsSchema = propsSchema;
@@ -135,24 +141,24 @@ export function blueprint<
         z.promise(resultSchema)
     );
 
-    blueprintInstance.setImplementation = function(this: Blueprint<P, R, ActualImplementation>, implementation: ActualImplementation) {
-        _implementation = implementation;
+    blueprintInstance.setImplementation = function(this: Blueprint<P, R, C>, implementation: C) {
+        implementation = implementation;
         return this; // Return this for chaining
     };
-    blueprintInstance.getImplementation = (): ActualImplementation | undefined => _implementation;
+    blueprintInstance.getImplementation = (): C => _implementation;
     blueprintInstance.isImplemented = (): boolean => _implementation !== undefined;
 
-    blueprintInstance.mod = function <NewP = P, NewR = R>(
-        this: Blueprint<P, R, ActualImplementation>, 
+    blueprintInstance.mod = function <NewP = P, NewR = R, NewC extends (props: NewP) => Promise<NewR> = (props: NewP) => Promise<NewR>>(
+        this: Blueprint<P, R, C>,
         mod: ( 
-            originalBP: Blueprint<P, R, ActualImplementation>
-        ) => Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>>
-    ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>> {
-        return mod(this); 
+            originalBP: Blueprint<P, R, C>
+        ) => Blueprint<NewP, NewR, NewC>
+    ): Blueprint<NewP, NewR, NewC> {
+        return mod(this);
     };
 
     blueprintInstance.adapt = function <NewP, NewR>(
-        this: Blueprint<P, R, ActualImplementation>, 
+        this: Blueprint<P, R, C>, 
         newPropsSchema: ZodType<NewP>,
         newResultSchema: ZodType<NewR>,
         propsAdapter: (newProps: NewP) => P | Promise<P>, 
@@ -162,11 +168,11 @@ export function blueprint<
         const originalBP = this; 
         const actualNewDescription = newDescription ?? `Adapted (${originalBP.description || 'Unnamed Blueprint'})`;
 
-        const adaptedBlueprint = blueprint<NewP, NewR>( 
-            newPropsSchema,
-            newResultSchema,
-            actualNewDescription
-        );
+        const adaptedBlueprint = blueprint<NewP, NewR>({
+            propsSchema: newPropsSchema,
+            resultSchema: newResultSchema,
+            description: actualNewDescription,
+        });
 
         adaptedBlueprint.setImplementation(async (adaptedPropsValue: NewP): Promise<NewR> => {
             const originalProps = await Promise.resolve(propsAdapter(adaptedPropsValue));
@@ -179,11 +185,11 @@ export function blueprint<
     };
 
     blueprintInstance.addon = function <AI extends object>(
-        this: Blueprint<P, R, ActualImplementation>,
+        this: Blueprint<P, R, C>,
         addonImplementation: AI
-    ): Blueprint<P, R, ActualImplementation> & AI {
+    ): Blueprint<P, R, C> & AI {
         Object.assign(this, addonImplementation);
-        return this as Blueprint<P, R, ActualImplementation> & AI;
+        return this as Blueprint<P, R, C> & AI;
     };
 
     return blueprintInstance;
@@ -206,11 +212,11 @@ const InitialResultSchema = z.object({
 type InitialResult = z.infer<typeof InitialResultSchema>;
 
 // Create an initial blueprint and set implementation fluently
-let bp1 = blueprint<InitialProps, InitialResult>( 
-    InitialPropsSchema,
-    InitialResultSchema,
-    "Simple Service BP V1"
-).setImplementation(async (props) => { // Chained setImplementation
+let bp1 = blueprint<InitialProps, InitialResult>({
+    propsSchema: InitialPropsSchema,
+    resultSchema: InitialResultSchema,
+    description: "Simple Service BP V1"
+}).setImplementation(async (props) => { // Chained setImplementation
     if (props.name === "FAIL_ME") {
         throw new Error("Simulated failure in bp1 implementation");
     }
@@ -245,11 +251,11 @@ const modFnToChangeTypes = (
     originalBP: Blueprint<InitialProps, InitialResult, (props: InitialProps) => Promise<InitialResult>>
 ): Blueprint<ModNewProps, ModNewResult, (props: ModNewProps) => Promise<ModNewResult>> => { 
     const newDescription = `${originalBP.description} (types transformed by mod fn)`;
-    const transformedBlueprint = blueprint<ModNewProps, ModNewResult>( 
-        ModNewPropsSchema,
-        ModNewResultSchema,
-        newDescription
-    );
+    const transformedBlueprint = blueprint<ModNewProps, ModNewResult>({
+        propsSchema: ModNewPropsSchema,
+        resultSchema: ModNewResultSchema,
+        description: newDescription
+    });
     return transformedBlueprint;
 };
 
@@ -422,7 +428,11 @@ async function runSimplifiedExamples() {
     // 4. Using LoggerAddon with .addon() method
     console.log("\n--- Example 4: Using LoggerAddon with .addon() method ---");
     try {
-        let bpWithAddon = blueprint<InitialProps, InitialResult>(InitialPropsSchema, InitialResultSchema, "Logger Test BP")
+        let bpWithAddon = blueprint<InitialProps, InitialResult>({
+            propsSchema: InitialPropsSchema,
+            resultSchema: InitialResultSchema,
+            description: "Logger Test BP"
+        })
             .setImplementation(async (props) => ({status: "logged", data: {...props, processedName: props.name.toUpperCase()}}))
             .addon(createLoggerAddon("TestBP")); // Chaining addon after setImplementation
         
@@ -446,11 +456,14 @@ async function runSimplifiedExamples() {
     // 5. Using ReactAddon with .addon() method
     console.log("\n--- Example 5: Using ReactAddon with .addon() method ---");
     try {
-        bpWithAddon = blueprint<InitialProps, InitialResult>(InitialPropsSchema, InitialResultSchema, "React Test BP")
-            .setImplementation(async (props) => ({status: "react-ok", data: {...props, processedName: props.name.toUpperCase()}}))
-            .addon(createReactAddon()) // Chaining addon
-            .hook() // Chaining addon method
-            .context(); // Chaining addon method
+        bpWithAddon = blueprint<InitialProps, InitialResult>({
+            propsSchema: InitialPropsSchema,
+            resultSchema: InitialResultSchema,
+            description: "React Test BP"
+        }) .setImplementation(async (props) => ({status: "react-ok", data: {...props, processedName: props.name.toUpperCase()}}))
+        .addon(createReactAddon()) // Chaining addon
+        .hook() // Chaining addon method
+        .context(); // Chaining addon method
 
         console.log("bpWithReact description:", bpWithAddon.description);
 
