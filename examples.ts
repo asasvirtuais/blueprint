@@ -106,16 +106,6 @@ async function runAllExamples() {
             console.error("❌ Enforcement failed! Category is:", resultEnforced.data.category);
         }
 
-        // Example with function provider for enforce
-        const bpEnforcedFn = bp1.enforce((props) => {
-            console.log("[enforce fn] Received props:", props); // props are Omit<InitialProps, 'category'>
-            // @ts-expect-error nothing important
-            return { category: `ENFORCED_FROM_FN_${props.id}` };
-        });
-        const resultEnforcedFn = await bpEnforcedFn({id: "enforce-fn-002", name: "Enforced Item Fn"});
-        console.log("✅ bpEnforcedFn Call Result:", resultEnforcedFn);
-
-
     } catch (e: any) {
         console.error("❌ Error during .enforce() example:", e.message, e.stack);
     }
@@ -194,6 +184,8 @@ async function runAllExamples() {
         console.error("❌ Error during ReactAddon example:", e.message, e.stack);
     }
 
+    bpWithAddon.addon({core: createLoggerAddon('CATCH')}).addon({core: createReactAddon()}).hook().log('').defaults(props => ({}))
+    .hook().log('')
 }
 
 // To run original examples (if you uncomment them in your local file):

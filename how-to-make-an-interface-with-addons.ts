@@ -73,9 +73,9 @@ export const lateAddon: Addon<FoneAddon> = {
     }
 }
 
+/*
 // The following chain can only be typed with this architecture. I got it from the wretch library.
-const myFunction = core<{a: 1, b: 2}, {c: 3}>().void().addon(soonAddon).some().addon(lateAddon).fone().void().some().fone()
-.someMethod()
+const myFunction = core<{a: 1, b: 2}, {c: 3}>().void().addon(soonAddon).some().addon(lateAddon).fone().void().some().fone().someMethod().some.fone()
 // No errors, typescript ok, IDE ok
 myFunction({a: 1, b: 2}).c === 3
 // */
