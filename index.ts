@@ -101,6 +101,20 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
     defaults<D extends Partial<P>>(
         defaultValuesProvider: D | ((props: P) => D)
     ): Blueprint<Omit<P, keyof D> & Partial<D>, R>;
+
+    /**
+     * Creates a new blueprint that keeps the same properties (props) but transforms the result.
+     * The new blueprint reuses the implementation of the original blueprint, applying an adapter
+     * to its result.
+     * @template NewR The new result type of the blueprint.
+     * @param adapter A function to transform the original result (R) to NewR. Can be async and receive the original props (P) for context.
+     * @param newResultSchema The Zod schema for the new blueprint's result (NewR).
+     * @returns A new Blueprint with the original props type (P) and the new result type (NewR).
+     */
+    returning<NewR>(
+        adapter: (result: R, props?: P) => NewR | Promise<NewR>,
+        newResultSchema: ZodType<NewR>
+    ): Blueprint<P, NewR, (props: P) => Promise<NewR>>;
 }
 
 /**
@@ -201,7 +215,7 @@ export function blueprint<
 
         adaptedBlueprint.setImplementation(async (adaptedPropsValue: NewP): Promise<NewR> => {
             const originalProps = await Promise.resolve(propsAdapter(adaptedPropsValue));
-            const originalResult = await originalBP(originalProps);
+            const originalResult = await originalBP(originalProps); // originalBP is callable
             const newAdaptedResult = await Promise.resolve(resultAdapter(originalResult, adaptedPropsValue));
             return newAdaptedResult;
         });
@@ -216,7 +230,6 @@ export function blueprint<
         return this as Blueprint<P, R, C> & AI;
     };
 
-    // --- Implementation for enforce ---
     blueprintInstance.enforce = function <E extends Partial<P>>(
         this: Blueprint<P, R, C>,
         enforcedValuesProvider: E | ((props: Omit<P, keyof E>) => E)
@@ -227,127 +240,127 @@ export function blueprint<
             throw new Error("Cannot use .enforce() on a blueprint with a non-object propsSchema. Current schema type: " + originalBP.propsSchema.constructor.name);
         }
         
-        // Determine keys to omit based on the provider type
-        // If it's a function, we can't know keys statically for schema omit,
-        // but we must assume the function provides ALL keys defined in E.
-        // For schema modification, we need the keys. If `enforcedValuesProvider` is a function,
-        // we can't get the keys without calling it. This implies `E` must be an object if we want to change the schema.
-        // Let's assume `enforcedValuesProvider` (if object) or `E` (type) gives the keys.
-        // A simple approach: if it's an object, use its keys. If it's a function, this is harder for schema.
-        // For simplicity, let's get keys from the first parameter if it's an object, otherwise this is tricky.
-        // A common pattern for E is that it's a concrete object type, so Object.keys(enforcedValuesProvider) works if it's not a function.
-        // To make it robust, we'd need E to be a Zod schema itself, or pass keys explicitly.
-        // Given E extends Partial<P>, we can't directly get keys of E for omit.
-        // We must rely on the actual object if provided.
-        
-        // This part is tricky: to create `newPropsSchema.omit(keys)`, `keys` must be from `enforcedValuesProvider` if it's an object.
-        // If `enforcedValuesProvider` is a function, we don't know the keys to omit for the schema beforehand.
-        // The type `Omit<P, keyof E>` implies we *do* know `keyof E`.
-        // This means `E` should represent the *shape* of the enforced props.
-        // We'll assume `Object.keys()` on `enforcedValuesProvider` (if it's an object) is sufficient for demo.
-        // A more robust solution might require passing a Zod schema for E.
-        let exampleKeysForOmission: Record<string, true> = {};
+        let keysToOmitForSchema: Record<string, true> = {};
         if (typeof enforcedValuesProvider !== 'function') {
-             Object.keys(enforcedValuesProvider).forEach(k => exampleKeysForOmission[k] = true);
+             Object.keys(enforcedValuesProvider).forEach(k => keysToOmitForSchema[k] = true);
         } else {
-            // If it's a function, we can't statically determine keys to omit for the schema.
-            // This is a limitation. The `Omit<P, keyof E>` implies E's keys are known.
-            // This suggests `E` should be a type with known keys.
-            // For this implementation, we'll proceed assuming E's keys are what we want to omit.
-            // This part would need refinement for full type safety with function providers if E's keys aren't inferable.
-            // However, `keyof E` in `Omit<P, keyof E>` refers to the keys of the type E, not the runtime value.
-            // This is a structural typing aspect.
-            // We can't use `keyof E` directly in `omit`'s runtime argument.
-            // The `omit` method needs a runtime object specifying keys.
-            // This is a fundamental challenge if `E` is only a type and `enforcedValuesProvider` is a function.
-            // For now, we'll throw if it's a function and we can't get keys.
-            // A better approach: the `enforce` method should take a schema for the enforced part.
-            // Or, the user must ensure `E` has keys that can be listed.
-             console.warn("[enforce] When using a function provider, static determination of keys for schema omission is not possible. The resulting schema might not be strictly Omit<P, keyof E>.");
+            console.warn("[enforce] When using a function provider for enforcedValuesProvider, the new props schema will not omit keys. Consider providing an object or ensuring E's keys are manually omitted if schema strictness is critical.");
+            // If E is a generic type parameter without a concrete value at runtime (like when enforcedValuesProvider is a function),
+            // we cannot reliably get its keys for `omit`. The type `Omit<P, keyof E>` is a type-level operation.
+            // Zod's `omit` method requires a runtime object specifying which keys to omit.
+            // In this case, newPropsSchema will be the same as originalPropsSchema, which might be acceptable
+            // as the runtime logic will still merge the enforced values.
+            // Alternatively, one might require `E` to be constrained e.g. to `z.ZodObject` to extract keys, or pass keys explicitly.
         }
 
-
-        // Cast propsSchema to ZodObject to access .omit and .shape
         const originalZodObject = originalBP.propsSchema as ZodObject<any, any, any, P, P>;
-        // The keys to omit must be passed as an object ` { key1: true, key2: true } `
-        // This is problematic if E's keys are not known at runtime from `enforcedValuesProvider`
-        // For this example, we'll proceed with `exampleKeysForOmission` which is best-effort.
-        // @ts-expect-error (probably works)
-        const newPropsSchema = originalZodObject.omit(exampleKeysForOmission) as ZodType<Omit<P, keyof E>>;
-        type NewP = Omit<P, keyof E>;
+        // @ts-ignore ZodObject.omit expects a specific type for keys, this is a simplified approach
+        const newPropsSchemaUntyped = Object.keys(keysToOmitForSchema).length > 0 ? originalZodObject.omit(keysToOmitForSchema) : originalZodObject;
+        const newPropsSchema = newPropsSchemaUntyped  as ZodType<Omit<P, keyof E>>;
 
-        return originalBP.mod(currentBP => { // currentBP is the original blueprint instance
-            return blueprint<NewP, R>({
+        type NewPEnforce = Omit<P, keyof E>;
+
+        return originalBP.mod(currentBP => { 
+            return blueprint<NewPEnforce, R>({
                 propsSchema: newPropsSchema,
-                resultSchema: currentBP.resultSchema, // Use result schema from currentBP
-                description: `${currentBP.description || 'Unnamed'} (enforced)`, // Simplified description
-            }).setImplementation(async (newProps: NewP) => {
+                resultSchema: currentBP.resultSchema, 
+                description: `${currentBP.description || 'Unnamed'} (enforced)`, 
+            }).setImplementation(async (newProps: NewPEnforce) => {
                 const enforcedValues = typeof enforcedValuesProvider === 'function'
-                    ? enforcedValuesProvider(newProps) // Call function with the new, partial props
+                    ? enforcedValuesProvider(newProps) 
                     : enforcedValuesProvider;
-                const combinedProps = { ...newProps, ...enforcedValues } as P; // newProps first, then enforced, though keys shouldn't overlap
-                return currentBP(combinedProps); // Call the original blueprint's implementation
-            }) as Blueprint<NewP, R, (props: NewP) => Promise<R>>;
-        }) as Blueprint<NewP, R, (props: NewP) => Promise<R>>; // Cast the result of mod
+                const combinedProps = { ...newProps, ...enforcedValues } as P; 
+                return currentBP(combinedProps); 
+            }) as Blueprint<NewPEnforce, R, (props: NewPEnforce) => Promise<R>>;
+        }) as Blueprint<NewPEnforce, R, (props: NewPEnforce) => Promise<R>>; 
     };
 
 
-    // --- Implementation for defaults ---
     blueprintInstance.defaults = function <D extends Partial<P>>(
         this: Blueprint<P, R, C>,
         defaultValuesProvider: D | ((props: P) => D)
     ): Blueprint<Omit<P, keyof D> & Partial<D>, R> {
 
-        type NewP = Omit<P, keyof D> & Partial<D>
+        type NewPDefaults = Omit<P, keyof D> & Partial<D>;
 
         const originalBP = this;
         if (!(originalBP.propsSchema instanceof ZodObject)) {
             throw new Error("Cannot use .defaults() on a blueprint with a non-object propsSchema. Current schema type: " + originalBP.propsSchema.constructor.name);
         }
 
-        const originalZodObject = originalBP.propsSchema as ZodObject<any, any, any, P, P>;
+        const originalZodObject = originalBP.propsSchema as ZodObject<ZodRawShape, any, any, P, P>; // Use ZodRawShape
         const originalShape = originalZodObject.shape;
 
         let keysForDefaults: (keyof D)[] = [];
         if (typeof defaultValuesProvider !== 'function') {
             keysForDefaults = Object.keys(defaultValuesProvider) as (keyof D)[];
         } else {
-            // If provider is a function, we don't know keys statically to make them optional in schema.
-            // This is a limitation. For robust schema transformation, defaultValuesProvider should be an object,
-            // or keys need to be passed explicitly.
-            // `keyof D` provides the type-level keys.
-            console.warn("[defaults] When using a function provider, static determination of keys for schema optional marking is not possible. The resulting schema might not correctly reflect optional fields.");
+             console.warn("[defaults] When using a function provider for defaultValuesProvider, static determination of keys for schema optional marking is not possible. The resulting schema might not correctly reflect optional fields unless D explicitly lists keys.");
+            // We need to infer keys from D to make them optional in the schema.
+            // This can be tricky if D is a broad `Partial<P>`.
+            // For a more robust schema transformation, defaultValuesProvider being an object is preferred,
+            // or you might need to pass the keys explicitly if D is too generic.
         }
-
-
+        
         const newShape = { ...originalShape };
         keysForDefaults.forEach(key => {
-            if (newShape[key as string]) {
-                newShape[key as string] = (newShape[key as string] as ZodTypeAny).optional();
+            const keyStr = key as string;
+            if (newShape[keyStr]) {
+                // Ensure the schema exists and can be made optional
+                if (typeof (newShape[keyStr] as ZodTypeAny).optional === 'function') {
+                     newShape[keyStr] = (newShape[keyStr] as ZodTypeAny).optional();
+                } else {
+                    console.warn(`[defaults] Schema for key '${keyStr}' does not have an optional method.`);
+                }
             }
         });
         
-        const newPropsSchema = z.object(newShape);
+        // Create new Zod object with potentially optional fields
+        // @ts-expect-error beyond typescript scope
+        const newPropsSchema = z.object(newShape) as ZodType<NewPDefaults>;
+
 
         return originalBP.mod(currentBP => {
-            const newBP = blueprint<NewP, R>({
-                // @ts-expect-error (yes it's an object)
-                propsSchema: newPropsSchema as ZodType<NewP>,
+            const newBP = blueprint<NewPDefaults, R>({
+                propsSchema: newPropsSchema,
                 resultSchema: currentBP.resultSchema,
                 description: `${currentBP.description || 'Unnamed'} (with defaults)`,
             });
 
-            newBP.setImplementation(async (props: NewP) => { // props type is NewP
+            newBP.setImplementation(async (props: NewPDefaults) => { 
                 const defaultValues = typeof defaultValuesProvider === 'function'
-                    ? defaultValuesProvider(props as any) // Cast props if function expects specific partial type
+                    // The props received here are NewPDefaults, which might be missing some keys from P.
+                    // The defaultValuesProvider function might expect a P. This is a slight mismatch.
+                    // Common practice is that defaultValuesProvider might get partially filled props.
+                    ? defaultValuesProvider(props as any) // Safest to cast, or ensure provider handles Partial<P>
                     : defaultValuesProvider;
-                const combinedProps = { ...defaultValues, ...props } as P; // Defaults first, then incoming props
+                const combinedProps = { ...defaultValues, ...props } as P; 
                 return currentBP(combinedProps);
             });
-            return newBP as Blueprint<NewP, R>
-        });
+            return newBP as Blueprint<NewPDefaults, R, (props: NewPDefaults) => Promise<R>>;
+        }) as Blueprint<NewPDefaults, R, (props: NewPDefaults) => Promise<R>>;
+    };
+
+    // --- Implementation for returning ---
+    blueprintInstance.returning = function <NewR>(
+        this: Blueprint<P, R, C>,
+        adapter: (result: R, props?: P) => NewR | Promise<NewR>,
+        newResultSchema: ZodType<NewR>
+    ): Blueprint<P, NewR, (props: P) => Promise<NewR>> {
+        const originalBP = this;
+        // We can reuse the `adapt` method.
+        // NewP is the same as P.
+        // NewR is the NewR from the returning method.
+        // propsAdapter is an identity function for P.
+        // resultAdapter is the adapter provided to `returning`.
+        return originalBP.adapt<P, NewR>(
+            originalBP.propsSchema, // Props schema remains the same
+            newResultSchema,        // New result schema
+            (currentProps: P) => currentProps, // Props adapter: identity
+            adapter,                // Result adapter from the method argument
+            `${originalBP.description || 'Unnamed Blueprint'} (result adapted)` // New description
+        );
     };
 
     return blueprintInstance;
 }
-
