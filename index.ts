@@ -6,7 +6,7 @@ import { z, ZodType, ZodError, ZodObject, ZodRawShape, ZodFunction, ZodTuple, Zo
  * @template R The type of the result (the resolved value of the Promise).
  * @template C The type of the core implementation function, (props: P) => Promise<R>.
  */
-export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P) => Promise<R>> {
+export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P) => Promise<R>, Self = unknown> {
     /**
      * Calls the blueprint's implementation with the given properties.
      * Validates props before calling and validates the result after.
@@ -27,7 +27,7 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @param implementation The function to execute when the blueprint is called.
      * @returns The blueprint instance for fluent chaining.
      */
-    setImplementation(implementation: C): this;
+    setImplementation(this: Self & Blueprint<P, R, C, Self>, implementation: C): this;
     getImplementation: () => C;
     isImplemented: () => boolean;
 
@@ -42,42 +42,13 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @returns The new Blueprint instance created by the modifier function.
      */
     mod<NewP = P, NewR = R>(
+        this: Self & Blueprint<P, R, C, Self>,
         mod: (
             originalBP: Blueprint<P, R, C>
         ) => Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>>
-    ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>>;
+    ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>> & Omit<this, keyof Blueprint<P, R>>;
 
-    /**
-     * Creates a new blueprint by adapting the properties (props) and result of this blueprint.
-     * The new blueprint reuses the implementation of this blueprint, with adapter functions
-     * bridging the differences in input and output types.
-     * @template NewP The properties type of the new (adapted) blueprint.
-     * @template NewR The result type of the new (adapted) blueprint.
-     * @param newPropsSchema The Zod schema for the new blueprint's properties.
-     * @param newResultSchema The Zod schema for the new blueprint's result.
-     * @param propsAdapter A function to transform NewP to P (this blueprint's props type). Can be async.
-     * @param resultAdapter A function to transform R (this blueprint's result type) to NewR. Can be async and receive NewP for context.
-     * @param newDescription An optional description for the adapted blueprint.
-     * @returns A new Blueprint with adapted props and result types, wrapping this blueprint's logic.
-     */
-    adapt<NewP, NewR>(
-        newPropsSchema: ZodType<NewP>,
-        newResultSchema: ZodType<NewR>,
-        propsAdapter: (newProps: NewP) => P | Promise<P>,
-        resultAdapter: (oldResult: R, newProps?: NewP) => NewR | Promise<NewR>,
-        newDescription?: string
-    ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>>;
-
-    /**
-     * Merges the properties and methods of an addon object into this blueprint instance.
-     * The blueprint instance is mutated.
-     * @template AI The type of the addon object.
-     * @param addonImplementation The addon object to merge.
-     * @returns The blueprint instance, now augmented with the addon's members.
-     */
-    addon<AI extends object>(
-        addonImplementation: AI
-    ): this & AI;
+    addon<B>(addon: Addon<B>): B & Self & Blueprint<P, R, C, Self & B>
 
     /**
      * Creates a new blueprint where certain properties are fixed ("enforced") to specific values.
@@ -87,8 +58,9 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @returns A new Blueprint that takes `Omit<P, keyof E>` as props.
      */
     enforce<E extends Partial<P>>(
+        this: Self & Blueprint<P, R, C, Self>,
         enforcedValuesProvider: E | ((props: Omit<P, keyof E>) => E)
-    ): Blueprint<Omit<P, keyof E>, R, (props: Omit<P, keyof E>) => Promise<R>>;
+    ): Blueprint<Omit<P, keyof E>, R, (props: Omit<P, keyof E>) => Promise<R>> & Omit<this, keyof Blueprint<P, R>>;
 
     /**
      * Creates a new blueprint where certain properties have default values.
@@ -99,8 +71,9 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @returns A new Blueprint whose props (with defaults) are now optional.
      */
     defaults<D extends Partial<P>>(
+        this: Self & Blueprint<P, R, C, Self>,
         defaultValuesProvider: D | ((props: P) => D)
-    ): Blueprint<Omit<P, keyof D> & Partial<D>, R>;
+    ): Blueprint<Omit<P, keyof D> & Partial<D>, R> & Omit<this, keyof Blueprint<P, R>>;
 
     /**
      * Creates a new blueprint that keeps the same properties (props) but transforms the result.
@@ -112,9 +85,10 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
      * @returns A new Blueprint with the original props type (P) and the new result type (NewR).
      */
     returning<NewR>(
+        this: Self & Blueprint<P, R, C, Self>,
         adapter: (result: R, props?: P) => NewR | Promise<NewR>,
         newResultSchema: ZodType<NewR>
-    ): Blueprint<P, NewR, (props: P) => Promise<NewR>>;
+    ): Blueprint<P, NewR, (props: P) => Promise<NewR>> & Omit<this, keyof Blueprint<P, R>>;
 }
 
 /**
@@ -196,39 +170,11 @@ export function blueprint<
         return modFn(this);
     };
 
-    blueprintInstance.adapt = function <NewP, NewR>(
-        this: Blueprint<P, R, C>,
-        newPropsSchema: ZodType<NewP>,
-        newResultSchema: ZodType<NewR>,
-        propsAdapter: (newProps: NewP) => P | Promise<P>,
-        resultAdapter: (oldResult: R, newProps?: NewP) => NewR | Promise<NewR>,
-        newDescription?: string
-    ): Blueprint<NewP, NewR, (props: NewP) => Promise<NewR>> {
-        const originalBP = this;
-        const actualNewDescription = newDescription ?? `Adapted (${originalBP.description || 'Unnamed Blueprint'})`;
-
-        const adaptedBlueprint = blueprint<NewP, NewR>({
-            propsSchema: newPropsSchema,
-            resultSchema: newResultSchema,
-            description: actualNewDescription,
-        });
-
-        adaptedBlueprint.setImplementation(async (adaptedPropsValue: NewP): Promise<NewR> => {
-            const originalProps = await Promise.resolve(propsAdapter(adaptedPropsValue));
-            const originalResult = await originalBP(originalProps); // originalBP is callable
-            const newAdaptedResult = await Promise.resolve(resultAdapter(originalResult, adaptedPropsValue));
-            return newAdaptedResult;
-        });
-        return adaptedBlueprint;
-    };
-
-    blueprintInstance.addon = function <AI extends object>(
-        this: Blueprint<P, R, C>,
-        addonImplementation: AI
-    ): Blueprint<P, R, C> & AI {
-        Object.assign(this, addonImplementation);
-        return this as Blueprint<P, R, C> & AI;
-    };
+    const _addons: Addon<unknown>[] = []
+    //@ts-expect-error C could be instantiated with a type that not of Blueprint. Can't fix it but ignoring it causes no problem. 
+    blueprintInstance.addon = function(addon) {
+        return { ...this, _addons: [_addons, addon], ...addon.core }
+    },
 
     blueprintInstance.enforce = function <E extends Partial<P>>(
         this: Blueprint<P, R, C>,
@@ -341,26 +287,9 @@ export function blueprint<
         }) as Blueprint<NewPDefaults, R, (props: NewPDefaults) => Promise<R>>;
     };
 
-    // --- Implementation for returning ---
-    blueprintInstance.returning = function <NewR>(
-        this: Blueprint<P, R, C>,
-        adapter: (result: R, props?: P) => NewR | Promise<NewR>,
-        newResultSchema: ZodType<NewR>
-    ): Blueprint<P, NewR, (props: P) => Promise<NewR>> {
-        const originalBP = this;
-        // We can reuse the `adapt` method.
-        // NewP is the same as P.
-        // NewR is the NewR from the returning method.
-        // propsAdapter is an identity function for P.
-        // resultAdapter is the adapter provided to `returning`.
-        return originalBP.adapt<P, NewR>(
-            originalBP.propsSchema, // Props schema remains the same
-            newResultSchema,        // New result schema
-            (currentProps: P) => currentProps, // Props adapter: identity
-            adapter,                // Result adapter from the method argument
-            `${originalBP.description || 'Unnamed Blueprint'} (result adapted)` // New description
-        );
-    };
-
     return blueprintInstance;
+}
+
+export type Addon<C> = {
+    core?: C
 }

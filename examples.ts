@@ -1,7 +1,7 @@
 // --- Example Usage ---
 
 import { z } from "zod";
-import { blueprint } from './index';
+import { Blueprint, blueprint } from './index';
 
 // Schemas for initial blueprint
 const InitialPropsSchema = z.object({
@@ -36,6 +36,52 @@ let bp1 = blueprint<InitialProps, InitialResult>({
         }
     };
 });
+
+// --- Example for LoggerAddon ---
+interface LoggerAddon {
+    readonly logPrefix: string; 
+    log: (message: string) => this;
+    setLogPrefix: (prefix: string) => this;
+}
+
+const createLoggerAddon = (initialPrefix: string): LoggerAddon => {
+    let currentPrefix = initialPrefix; 
+    return {
+        get logPrefix() { 
+            return currentPrefix;
+        },
+        log: function(message: string) {
+            const bpDescription = (this as any).description || 'Blueprint';
+            console.log(`[${bpDescription} Log - ${currentPrefix}]: ${message}`);
+            return this
+        },
+        setLogPrefix: function(newPrefix: string) {
+            currentPrefix = newPrefix;
+            return this
+        }
+    };
+};
+
+// --- Example for ReactAddon ---
+interface ReactAddon {
+    /** Placeholder for React hook integration. Returns `this` for chaining. */
+    hook(): this;
+    /** Placeholder for React context integration. Returns `this` for chaining. */
+    context(): this;
+}
+
+const createReactAddon = (): ReactAddon => {
+    return {
+        hook: function() {
+            console.log(`[ReactAddon ${(this as any).description || ''}] hook() called.`);
+            return this;
+        },
+        context: function() {
+            console.log(`[ReactAddon ${(this as any).description || ''}] context() called.`);
+            return this;
+        }
+    };
+};
 
 async function runAllExamples() {
     console.log("--- Running Original Blueprint Examples (with fix in setImplementation) ---");
@@ -119,6 +165,35 @@ async function runAllExamples() {
     } catch (e: any) {
         console.error("❌ Error during .defaults() example:", e.message, e.stack);
     }
+
+    let bpWithAddon!: Blueprint<InitialProps, InitialResult>
+    // 5. Using ReactAddon with .addon() method
+    console.log("\n--- Example 5: Using ReactAddon with .addon() method ---");
+    try {
+        bpWithAddon = blueprint<InitialProps, InitialResult>({
+            propsSchema: InitialPropsSchema, resultSchema: InitialResultSchema, description: "React Test BP"
+        })
+            .setImplementation(async (props) => ({status: "react-ok", data: {...props, processedName: props.name.toUpperCase()}}))
+            .addon({core: createReactAddon()}) // Chaining addon
+            .hook() // Chaining addon method
+            .context(); // Chaining addon method
+
+        console.log("bpWithReact description:", bpWithAddon.description);
+
+        console.log("Calling bpWithReact (which is bpForReact, now with React addon methods):");
+        const resultWithReact = await bpWithAddon({ id: "react-item-001", name: "React Item" });
+        console.log("✅ bpWithReact Call Result:", resultWithReact);
+
+        if (typeof (bpWithAddon as any).log === 'function') {
+            console.log("bpWithReact has a log method - this means LoggerAddon was also applied.");
+        } else {
+            console.log("bpWithReact does NOT have a log method (as expected for this isolated example).");
+        }
+
+    } catch (e: any) {
+        console.error("❌ Error during ReactAddon example:", e.message, e.stack);
+    }
+
 }
 
 // To run original examples (if you uncomment them in your local file):
