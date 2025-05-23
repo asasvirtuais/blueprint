@@ -1,85 +1,83 @@
-import { z, ZodType, ZodError, ZodObject, ZodRawShape, ZodFunction, ZodTuple, ZodTypeAny } from 'zod'
+import { z, ZodType } from 'zod'
 
-export interface Blueprint<P = {}, R = {}, C extends (props: P) => R = (props: P) => R, Self = unknown> {
+export interface Blueprint<Self = unknown, P = {}, R = {}> {
     (props: P): R
 
     key?: string
     description?: string
 
-    implementation: C
+    implementation: (props: P) => R
     addons: Addon[]
 
-    implement(this: Self & Blueprint<P, R, C, Self>, implementation: C): this
+    implement(this: Self & Blueprint<Self, P, R>, implementation: (props: P) => R): this
 
     mod<NewP = P, NewR = R>(
-        this: Self & Blueprint<P, R, C, Self>,
-        mod: (blueprint: Self & Blueprint<P, R, C, Self>) => (props: NewP) => NewR
-    ): Blueprint<NewP, NewR, (props: NewP) => NewR> & Omit<this, keyof Blueprint<P, R>>
+        this: Self & Blueprint<Self, P, R>,
+        mod: (blueprint: Self & Blueprint<Self, P, R>) => (props: NewP) => NewR
+    ): Blueprint<Self, NewP, NewR> & Omit<this, keyof Blueprint<Self, P, R>>
 
-    addon<A extends Addon>(addon: A): A['core'] & Self & Blueprint<P, R, C, Self & A['core']>
+    addon<A extends Addon>(addon: A): A['core'] & Self & Blueprint<Self & A['core'], P, R>
 
     enforce<E extends Partial<P>>(
-        this: Self & Blueprint<P, R, C, Self>,
+        this: Self & Blueprint<Self, P, R>,
         enforcedValues: E
-    ): Blueprint<Omit<P, keyof E>, R, (props: Omit<P, keyof E>) => R> & Omit<this, keyof Blueprint<P, R>>
+    ): Self & Blueprint<Blueprint<Self, P, R>, Omit<P, keyof E>, R>
 
     defaults<D extends Partial<P>>(
-        this: Self & Blueprint<P, R, C, Self>,
+        this: Self & Blueprint<Self, P, R>,
         defaultValuesProvider: D | ((props: P) => D)
-    ): Blueprint<Omit<P, keyof D> & Partial<D>, R> & Omit<this, keyof Blueprint<P, R>>
+    ): Self & Blueprint<Self, Omit<P, keyof D> & Partial<D>>
 
     returning<NewR>(
-        this: Self & Blueprint<P, R, C, Self>,
+        this: Self & Blueprint<Self, P, R>,
         adapter: (result: R, props?: P) => NewR,
         newResultSchema: ZodType<NewR>
-    ): Blueprint<P, NewR, (props: P) => NewR> & Omit<this, keyof Blueprint<P, R>>
+    ): Self & Blueprint<Self, P, NewR>
 
-    async(this: Self & Blueprint<P, R, C, Self>): Blueprint<P, Promise<R>, (props: P) => Promise<R>, Self>
+    async(this: Self & Blueprint<Self, P, R>): Self & Blueprint<Self, P, Promise<R>>
 
-    void(this: Self & Blueprint<P, R, C, Self>): Blueprint<P, void, (props: P) => void, Self>
+    void(this: Self & Blueprint<Self, P, R>): Self & Blueprint<Self, P, void>
 }
 
 /**
  * Creates a simplified "late implementation" function blueprint with mod, adapt, and addon methods.
  */
 export function blueprint<
-    P,
-    R,
-    C extends (props: P) => R = (props: P) => R,
-    T extends Addon = Addon
+    P = {},
+    R = {},
 >({
     key,
     description,
     addons = [],
-    init = (async (_props: P) => { throw new Error('Not Implemented') }) as C
+    init = ((_props: P) => { throw new Error('Not Implemented') }) as (props: P) => R
 }: {
     key?: string,
     description?: string,
-    init?: C,
+    init?: (props: P) => R,
     addons?: Addon[]
-}): Blueprint<P, R, (props: P) => R, T> {
+}): Blueprint<{}, P, R> {
 
-    let implementation: C = init
+    type T = Blueprint<{}, P, R>
 
-    type This = Blueprint<P, R, C, T>
-    const _blueprint = implementation as unknown as This
+    let implementation: (props: P) => R = init
+
+    type This = T
+    const _blueprint = implementation as This
 
     _blueprint.key = key
     _blueprint.description = description
 
-    _blueprint.implement = function (this: This, newImplementation: C) {
+    _blueprint.implement = function (this: This, newImplementation: (props: P) => R ) {
         implementation = newImplementation
         return _blueprint
     }
 
-    // @ts-expect-error could be instantiate with different subtype error
-    _blueprint.mod = function <NewP = P, NewR = R, NewC extends (props: NewP) => NewR = (props: NewP) => NewR>(
+    _blueprint.mod = function <NewP = P, NewR = R>(
         this: This,
         mod: (
             originalBP: This
         ) => (props: NewP) => NewR
-    ): Blueprint<NewP, NewR, NewC, T> {
-        // @ts-expect-error could be instantiate with different subtype error
+    ) {
         return blueprint({
             addons: _blueprint.addons,
             key: _blueprint.key,
@@ -90,7 +88,6 @@ export function blueprint<
 
     _blueprint.addons = addons
 
-    // @ts-expect-error could be instantiate with different subtype error
     _blueprint.addon = function(addon) {
         _blueprint.addons.push(addon)
         return _blueprint
@@ -99,53 +96,48 @@ export function blueprint<
     _blueprint.enforce = function <E extends Partial<P>>(
         this: This,
         enforce: E | ((props: P) => E)
-    ): Blueprint<Omit<P, keyof E>, R, (props: Omit<P, keyof E>) => R> {
-        // @ts-expect-error could be instantiate with different subtype error
+    ): Blueprint<This, Omit<P, keyof E>, R> {
+    // @ts-expect-error unrelated subtype issue
         return _blueprint.mod(blueprint => {
-            return (props) => blueprint({ ...props, ...(
-                // @ts-expect-error could be instantiate with different subtype error
-                typeof enforce === 'function' ? enforce(props) : enforce
-            ) } as P)
+            return (props: P) => blueprint({
+                ...props,
+                ...(typeof enforce === 'function' ? enforce(props) : enforce)
+            } as P)
         })
     }
 
     _blueprint.defaults = function <D extends Partial<P>>(
         this: This,
         defaults: D | ((props: P) => D)
-    ): Blueprint<Omit<P, keyof D> & Partial<D>, R> {
+    ): Blueprint<This, Omit<P, keyof D> & Partial<D>, R> {
 
         type NewP = Omit<P, keyof D> & Partial<D>
 
-        // @ts-expect-error could be instantiate with different subtype error
         return _blueprint.mod(blueprint => {
             return (props) => blueprint({
                 // @ts-expect-error could be instantiate with different subtype error
             ...(typeof defaults === 'function' ? defaults(props) : defaults),
             ...props } as P)
-        }) as Blueprint<NewP, R, (props: NewP) => R>
+        }) as Blueprint<This, NewP, R>
     }
 
     _blueprint.returning = function <NewR>(
-        this: Blueprint<P, R, C>,
-        returning: (result: R, props?: P) => NewR | NewR,
-    ): Blueprint<P, NewR, (props: P) => NewR> {
-        // @ts-expect-error could be instantiate with different subtype error
+        returning: ((result: R, props?: P) => NewR) | NewR,
+    ): Blueprint<This, P, NewR> {
         return _blueprint.mod(blueprint => {
             // @ts-expect-error could be instantiate with different subtype error
             return blueprint((props: P) => {
-                return returning(blueprint(props), props)
-            }) as Blueprint<P, NewR, (props: P) => NewR>
-        }) as Blueprint<P, NewR, (props: P) => NewR>
+                return typeof returning === 'function' ? (returning as (result: R, props?: P) => NewR)(blueprint(props), props) : returning
+            }) as Blueprint<This, P, NewR>
+        }) as Blueprint<This, P, NewR>
     }
 
-    // @ts-expect-error could be instantiate with different subtype error
     _blueprint.void = function () {
-        // @ts-expect-error could be instantiate with different subtype error
         return _blueprint.mod(blueprint => {
             return (props: P) => {
                 blueprint(props)
             }
-        }) as Blueprint<P, void, (props: P) => void>
+        }) as Blueprint<This, P, void>
     }
 
     return _blueprint
