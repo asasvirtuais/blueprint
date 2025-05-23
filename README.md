@@ -1,4 +1,24 @@
 # Blueprint
-Late implementation function builder
 
-I had the idea but I wasn't able to implement it as well as Gemini 2.5 Pro which beat Claude 4 Sonnet on this challenge.
+Blueprint is a TypeScript library for intuitive function composition with late implementation, designed to reduce repetitive typing and streamline code reuse across different runtimes (frontend, backend, edge).
+
+## Problem
+
+As projects grow, they accumulate many helper functions that are combined into complex workflows. In TypeScript, this often leads to repetitive code, with many functions sharing similar parameter and return types. This repetition makes codebases harder to maintain and evolve.
+
+## Solution
+
+Blueprint introduces a new, intuitive approach to function composition, inspired by the `wretch` library. Instead of relying on the complex academic syntax of most functional programming libraries, Blueprint provides a builder-like API for composing functions. This makes it easy to share and reuse function parameters and return types across contexts, reducing boilerplate and unnecessary imports.
+
+## Goal
+
+- Avoid repetitive typing and redundant imports
+- Enable seamless sharing of function blueprints across runtimes
+- Simplify the process of composing complex workflows
+
+## Addons
+
+Blueprint supports addons, which allow sharing the blueprints of your functions across different runtimes and implement them accordingly. Addons help you:
+- Share parameteR (props) and return (result) types
+- Implement runtime-specific logic while maintaining type safety
+- Sharing the types and some shareable implementation across environments.
