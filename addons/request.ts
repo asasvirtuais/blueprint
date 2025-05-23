@@ -1,4 +1,4 @@
-import { Addon, Blueprint } from "../index"
+import { Addon, Blueprint } from "../src/index"
 
 export interface RequestProps {
     url: string
@@ -8,12 +8,11 @@ export interface RequestProps {
 }
 
 export interface RequestAddon {
-    request <T extends RequestAddon, Props, Result>(this: T & Blueprint<T, Props, Promise<Result>>, url: string): T & Blueprint<T, Props, Promise<Result>>
+    request <T extends RequestAddon, Props, Result>(this: T & Blueprint<T, Props, Promise<Result>>, url: string): this
 }
 
 export const requestAddon : Addon<RequestAddon> = {
     core: {
-        // @ts-expect-error haunted by the subtype error
         request<
             T extends RequestAddon,
             Props,

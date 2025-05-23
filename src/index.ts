@@ -6,7 +6,6 @@ export interface Blueprint<Self = unknown, P = {}, R = {}> {
     key?: string
     description?: string
 
-    implementation: (props: P) => R
     addons: Addon[]
 
     implement(this: Self & Blueprint<Self, P, R>, implementation: (props: P) => R): this
@@ -34,15 +33,22 @@ export interface Blueprint<Self = unknown, P = {}, R = {}> {
         newResultSchema: ZodType<NewR>
     ): Self & Blueprint<Self, P, NewR>
 
-    async(this: Self & Blueprint<Self, P, R>): Self & Blueprint<Self, P, Promise<R>>
+    async(this: Self & Blueprint<Self, P, R>): Blueprint<Self, P, Promise<R>>
 
     void(this: Self & Blueprint<Self, P, R>): Self & Blueprint<Self, P, void>
+}
+
+export type BlueprintOptions<P = {}, R = {}> = {
+    key?: string,
+    description?: string,
+    init?: (props: P) => R,
+    addons?: Addon[]
 }
 
 /**
  * Creates a simplified "late implementation" function blueprint with mod, adapt, and addon methods.
  */
-export function blueprint<
+export default function blueprint<
     P = {},
     R = {},
 >({
@@ -50,12 +56,7 @@ export function blueprint<
     description,
     addons = [],
     init = ((_props: P) => { throw new Error('Not Implemented') }) as (props: P) => R
-}: {
-    key?: string,
-    description?: string,
-    init?: (props: P) => R,
-    addons?: Addon[]
-}): Blueprint<{}, P, R> {
+}: BlueprintOptions<P,R>): Blueprint<{}, P, R> {
 
     type T = Blueprint<{}, P, R>
 
@@ -130,6 +131,20 @@ export function blueprint<
                 return typeof returning === 'function' ? (returning as (result: R, props?: P) => NewR)(blueprint(props), props) : returning
             }) as Blueprint<This, P, NewR>
         }) as Blueprint<This, P, NewR>
+    }
+
+    _blueprint.async = function () {
+        return _blueprint.mod(blueprint => {
+            return (props: P) => {
+                return new Promise((resolve, reject) => {
+                    try {
+                        resolve(blueprint(props))
+                    } catch (error) {
+                        reject(error)
+                    }
+                })
+            }
+        }) as Blueprint<This, P, Promise<R>>
     }
 
     _blueprint.void = function () {
