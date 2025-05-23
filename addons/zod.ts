@@ -27,16 +27,7 @@ export const zodAddon: Addon<ZodAddon> = {
                 ...(this.schemas || {}),
                 ...schemas,
             }
-            return this.mod((blueprint) => {
-                return ((props: P) => {
-                    if (schemas.props)
-                        props = schemas.props.parse(props)
-                    const result = blueprint(props)
-                    if (schemas.result)
-                        return schemas.result.parse(result)
-                    return result
-                })
-            }) as Blueprint<P, R, (props: P) => R, ZodAddon>
+            return this
         },
         zProps<T extends ZodAddon, P, R>(this: T & Blueprint<P, R, (props: P) => R, T>, schema: ZodType<P>) {
             this.schemas = {
