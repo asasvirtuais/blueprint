@@ -1,39 +1,61 @@
-import { z } from "zod"
-import { Addon, Blueprint } from "../index"
-import useSWRMutation from "swr/mutation"
-import { RequestProps, requestAddon } from "./request"
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
+import { Addon, Blueprint, blueprint } from "../index"
 
 export interface ReactAddon {
-    requestHook<T extends ReactAddon, Props, Result>(
-        this: T & Blueprint<Props, Result, (props: Props) => Promise<Result>, T>,
-        url: string,
-        resultSchema: z.ZodType<Result>,
-        key?: string
-    ): () => ReturnType<typeof useSWRMutation<Result, any, string, Omit<RequestProps, 'url'>>>
+    hook<T extends ReactAddon, Props, Result, Call extends (props: Props) => Promise<Result> = (props: Props) => Promise<Result>>(
+        this: T & Blueprint<Props, Result, Call, T>,
+    ): () => Blueprint<Props, Result, Call, T> & {
+        loading: boolean
+        error: any
+        result: Result | undefined
+    }
 }
 
 export const reactAddon = (): Addon<ReactAddon> => ({
     core: {
-        requestHook(url, resultSchema, key) {
-            // First apply the request addon and call request method
-            const requestBP = this.addon(requestAddon()).request(url, resultSchema)
-            
-            // Return a function that when called (as a hook) returns useSWRMutation
+        hook<T extends ReactAddon, Props, Result, Call extends (props: Props) => Promise<Result> = (props: Props) => Promise<Result>>() {
+            const blueprintInstance = this as T & Blueprint<Props, Result, Call, T>
+
             return () => {
-                // Create a memoized fetcher that maps SWR args to request props
-                const fetcher = useCallback(
-                    async (swrKey: string, { arg }: { arg: Omit<RequestProps, 'url'> }) => {
-                        // The SWR key is the URL, combine with other props
-                        const fullProps: RequestProps = { ...arg, url: swrKey }
-                        return await requestBP(fullProps)
-                    },
-                    []
+                const [loading, setLoading] = useState(false)
+                const [error, setError] = useState<any>()
+                const [result, setResult] = useState<any>()
+                const triggerBlueprint = useCallback(
+                    // @ts-expect-error extends but could be assignable error
+                    blueprintInstance.mod(originalBP => // originalBP is essentially blueprintInstance here
+                        blueprint<any, any>({ // Define the new blueprint that will be our 'trigger'
+                            propsSchema: originalBP.propsSchema, // It accepts the same props as the original
+                            resultSchema: originalBP.resultSchema,
+                            description: `${originalBP.description || 'Blueprint'} (hook-wrapped)`
+                        }).setImplementation(async (props: any) => { // Implementation for the new 'trigger' blueprint
+                            setLoading(true)
+                            setError(undefined) // Clear previous error
+                            try {
+                                return await originalBP(props) // Call the original blueprint logic
+                            } catch (e) {
+                                setError(e)
+                                throw e // Re-throw so the caller of the blueprint also sees the error
+                            } finally {
+                                setLoading(false)
+                            }
+                        })
+                    ) as Blueprint<Props, Result, Call, T> & { name: string }, // Cast to the correct type,
+                    // Dependencies for creating this triggerBlueprint:
+                    // blueprintInstance is from 'this', effectively stable for the hook's lifecycle.
+                    // setLoading, setError, setResult are stable state setters.
+                    [blueprintInstance, setLoading, setError, setResult]
                 )
-                
-                // Use provided key or the url as the SWR key
-                const swrKey = key || url
-                return useSWRMutation(swrKey, fetcher)
+
+
+                return Object.assign(triggerBlueprint, {
+                    loading,
+                    error,
+                    result,
+                }) as T & Blueprint<Props, Result, Call, T> & {
+                    loading: boolean
+                    error: any
+                    result: Result | undefined
+                }
             }
         }
     }
