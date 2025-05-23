@@ -17,7 +17,7 @@ export default function HomePage() {
 
   useEffect(() => {
     trigger()
-  }, [trigger])
+  }, [])
 
   if (loading) return <p>Loading...</p>
   if (error) return <p>Error: {error.message}</p>

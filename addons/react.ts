@@ -1,3 +1,4 @@
+'use client'
 import { useCallback, useState } from "react"
 import { Addon, Blueprint } from "../src/index"
 

@@ -1,6 +1,6 @@
 import { z, ZodType } from 'zod'
 
-export interface Blueprint<Self = unknown, P = {}, R = {}> {
+export interface Blueprint<Self = {}, P = {}, R = {}> {
     (props: P): R
 
     key?: string
@@ -55,15 +55,15 @@ export default function blueprint<
     key,
     description,
     addons = [],
-    init = ((_props: P) => { throw new Error('Not Implemented') }) as (props: P) => R
+    init,
 }: BlueprintOptions<P,R>): Blueprint<{}, P, R> {
 
     type T = Blueprint<{}, P, R>
 
-    let implementation: (props: P) => R = init
+    let implementation: (props: P) => R = init ?? ((_props: P) => { throw new Error('Not Implemented') }) as (props: P) => R
 
     type This = T
-    const _blueprint = implementation as This
+    const _blueprint = ((props) => implementation(props)) as This
 
     _blueprint.key = key
     _blueprint.description = description
@@ -87,11 +87,10 @@ export default function blueprint<
         })
     }
 
-    _blueprint.addons = addons
+    _blueprint.addons = addons ?? []
 
     _blueprint.addon = function(addon) {
-        _blueprint.addons.push(addon)
-        return _blueprint
+        return Object.assign(_blueprint, { addons: [..._blueprint.addons, addon], ...addon.core })
     }
 
     _blueprint.enforce = function <E extends Partial<P>>(
@@ -158,6 +157,6 @@ export default function blueprint<
     return _blueprint
 }
 
-export type Addon<B = unknown> = {
+export type Addon<B = {}> = {
     core: B
 }
