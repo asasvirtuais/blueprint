@@ -1,4 +1,4 @@
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { z } from 'zod'
 import { blueprint } from './index'
 import { reactAddon } from './addons/react'
@@ -24,9 +24,11 @@ describe('echoReactBP.hook', () => {
       triggerResult = await result.current({ message: 'From Test' })
     })
     expect(triggerResult).toEqual({ echoed: 'Echo: From Test' })
-    // The blueprint function is also the current, so we can check its properties
-    expect((result.current).loading).toBe(false)
-    expect((result.current).error).toBeUndefined()
-    expect((result.current).result).toEqual({ echoed: 'Echo: From Test' })
+    // Wait for the state update
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+      expect(result.current.error).toBeUndefined()
+      expect(result.current.result).toEqual({ echoed: 'Echo: From Test' })
+    })
   })
 })

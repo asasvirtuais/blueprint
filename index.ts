@@ -113,7 +113,7 @@ export function blueprint<
             originalBP: Blueprint<P, R, C>
         ) => Blueprint<NewP, NewR, NewC>
     ): Blueprint<NewP, NewR, NewC> {
-        return modFn(this)
+        return modFn(blueprintInstance)
     }
 
     const _addons: Addon<unknown>[] = []

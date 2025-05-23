@@ -43,10 +43,12 @@ export const reactAddon = (): Addon<ReactAddon> => ({
                             setLoading(true)
                             setError(undefined) // Clear previous error
                             try {
-                                return await originalBP(props) // Call the original blueprint logic
+                                const res = await originalBP(props)
+                                setResult(res)
+                                return res
                             } catch (e) {
                                 setError(e)
-                                throw e // Re-throw so the caller of the blueprint also sees the error
+                                throw e
                             } finally {
                                 setLoading(false)
                             }
