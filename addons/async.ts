@@ -10,7 +10,12 @@ export interface AsyncAddon {
 
 export const asyncAddon: Addon<AsyncAddon> = {
     core: {
-        enforce: function<
+        async() {
+            return this.mod((blueprint) => {
+                return async (props) => await blueprint(props)
+            })
+        },
+        enforce<
             T extends AsyncAddon,
             Props,
             Result,
@@ -26,12 +31,7 @@ export const asyncAddon: Addon<AsyncAddon> = {
                 }
             })
         },
-        async() {
-            return this.mod((blueprint) => {
-                return async (props) => await blueprint(props)
-            })
-        },
-        defaults: function <
+        defaults<
             T extends AsyncAddon,
             Props,
             Result,
@@ -47,7 +47,7 @@ export const asyncAddon: Addon<AsyncAddon> = {
                 }
             })
         },
-        returning: function <
+        returning<
             T extends AsyncAddon,
             Props,
             Result,
