@@ -43,7 +43,8 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
 export function blueprint<
     P,
     R,
-    C extends (props: P) => Promise<R> = (props: P) => Promise<R>
+    C extends (props: P) => Promise<R> = (props: P) => Promise<R>,
+    T = unknown
 >({
     propsSchema,
     resultSchema,
@@ -56,7 +57,7 @@ export function blueprint<
     name?: string,
     description?: string,
     initialImplementation?: C
-}): Blueprint<P, R, (props: P) => Promise<R>> {
+}): Blueprint<P, R, (props: P) => Promise<R>, T> {
     let _implementation: C = initialImplementation
 
     const blueprintInstanceCallable = async (propsValue: P): Promise<R> => {
