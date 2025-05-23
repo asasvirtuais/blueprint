@@ -19,7 +19,7 @@ export const reactAddon = (): Addon<ReactAddon> => ({
             return () => {
                 const [loading, setLoading] = useState(false)
                 const [error, setError] = useState<any>()
-                const [result, setResult] = useState<any>()
+                const [result, setResult] = useState<Result>()
                 const triggerBlueprint = useCallback(
                     // @ts-expect-error extends but could be assignable error
                     blueprintInstance.mod(originalBP => // originalBP is essentially blueprintInstance here
