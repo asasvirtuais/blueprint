@@ -1,4 +1,5 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { use } from 'react'
 import { z } from 'zod'
 import { blueprint } from './index'
 import { reactAddon } from './addons/react'
@@ -11,14 +12,14 @@ describe('echoReactBP.hook', () => {
     propsSchema: EchoProps,
     resultSchema: EchoResult,
     description: 'Echo Service'
-  }).setImplementation(async (props: { message: string }) => {
+  }).setImplementation((props: { message: string }) => {
     return { echoed: `Echo: ${props.message}` }
   })
   const echoReactBP = echoBlueprint.addon(reactAddon())
 
   it('should trigger and return echoed result', async () => {
     const useEcho = echoReactBP.hook()
-    const { result } = renderHook(() => useEcho())
+    const { result } = renderHook(() => useEcho({ message: 'Hello World' }))
     let triggerResult: any
     await act(async () => {
       triggerResult = await result.current({ message: 'From Test' })
