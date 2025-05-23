@@ -18,7 +18,7 @@ const echoBlueprint = blueprint<EchoProps, EchoResult>({
   propsSchema: EchoProps,
   resultSchema: EchoResult,
   description: "Echo Service"
-}).setImplementation(async (props) => {
+}).implement(async (props) => {
   return { echoed: `Echo: ${props.message}` }
 })
 

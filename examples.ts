@@ -22,7 +22,7 @@ let bp1 = blueprint<InitialProps, InitialResult>({
     propsSchema: InitialPropsSchema,
     resultSchema: InitialResultSchema,
     description: "Simple Service BP V1"
-}).setImplementation(async (props) => {
+}).implement(async (props) => {
     if (props.name === "FAIL_ME") {
         throw new Error("Simulated failure in bp1 implementation");
     }
@@ -163,7 +163,7 @@ async function runAllExamples() {
         bpWithAddon = blueprint<InitialProps, InitialResult>({
             propsSchema: InitialPropsSchema, resultSchema: InitialResultSchema, description: "React Test BP"
         })
-            .setImplementation(async (props) => ({status: "react-ok", data: {...props, processedName: props.name.toUpperCase()}}))
+            .implement(async (props) => ({status: "react-ok", data: {...props, processedName: props.name.toUpperCase()}}))
             .addon({core: createReactAddon()}) // Chaining addon
             .hook() // Chaining addon method
             .context(); // Chaining addon method
