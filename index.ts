@@ -33,6 +33,10 @@ export interface Blueprint<P = {}, R = {}, C extends (props: P) => R = (props: P
         adapter: (result: R, props?: P) => NewR,
         newResultSchema: ZodType<NewR>
     ): Blueprint<P, NewR, (props: P) => NewR> & Omit<this, keyof Blueprint<P, R>>
+
+    async(this: Self & Blueprint<P, R, C, Self>): Blueprint<P, Promise<R>, (props: P) => Promise<R>, Self>
+
+    void(this: Self & Blueprint<P, R, C, Self>): Blueprint<P, void, (props: P) => void, Self>
 }
 
 /**
@@ -129,10 +133,19 @@ export function blueprint<
         return _blueprint.mod(blueprint => {
             // @ts-expect-error could be instantiate with different subtype error
             return blueprint((props: P) => {
-                const transformedResult = returning(blueprint(props), props)
-                return transformedResult
+                return returning(blueprint(props), props)
             }) as Blueprint<P, NewR, (props: P) => NewR>
         }) as Blueprint<P, NewR, (props: P) => NewR>
+    }
+
+    // @ts-expect-error could be instantiate with different subtype error
+    _blueprint.void = function () {
+        // @ts-expect-error could be instantiate with different subtype error
+        return _blueprint.mod(blueprint => {
+            return (props: P) => {
+                blueprint(props)
+            }
+        }) as Blueprint<P, void, (props: P) => void>
     }
 
     return _blueprint
