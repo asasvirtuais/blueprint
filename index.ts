@@ -6,7 +6,7 @@ export interface Blueprint<P, R, C extends (props: P) => Promise<R> = (props: P)
     propsSchema: ZodType<P>
     resultSchema: ZodType<R>
     implementationSignatureSchema: ZodFunction<ZodTuple<[ZodType<P>]>, ZodType<Promise<R>>>
-    name?: string
+    key?: string
     description?: string
 
     setImplementation(this: Self & Blueprint<P, R, C, Self>, implementation: C): this
@@ -48,13 +48,13 @@ export function blueprint<
 >({
     propsSchema,
     resultSchema,
-    name,
+    key,
     description,
     initialImplementation = (async (_props: P): Promise<R> => { throw new Error('Not Implemented') }) as C
 }: {
     propsSchema: ZodType<P>,
     resultSchema: ZodType<R>,
-    name?: string,
+    key?: string,
     description?: string,
     initialImplementation?: C
 }): Blueprint<P, R, (props: P) => Promise<R>, T> {
@@ -93,7 +93,7 @@ export function blueprint<
 
     blueprintInstance.propsSchema = propsSchema
     blueprintInstance.resultSchema = resultSchema
-    blueprintInstance.name = name
+    blueprintInstance.key = key
     blueprintInstance.description = description
     blueprintInstance.implementationSignatureSchema = z.function(
         z.tuple([propsSchema as ZodTypeAny]),

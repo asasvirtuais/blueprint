@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     /* Base Options */
-    "target": "ES2020", // Or a newer version like ES2022, ESNext. ES2020 supports async/await and other modern features.
+    "target": "ESNext", // Or a newer version like ES2022, ESNext. ES2020 supports async/await and other modern features.
     "module": "ESNext", // Use modern ES modules. Consumers can bundle as needed.
     "lib": ["ES2020", "DOM"], // Include DOM lib if any part might run in a browser context, or if utility types are needed.
     "allowJs": false, // Disallow JavaScript files from being compiled.
@@ -43,8 +43,8 @@
     // "noErrorTruncation": true, // Do not truncate error messages.
 
     /* Completeness */
-    "noUnusedLocals": true, // Report errors on unused locals.
-    "noUnusedParameters": true, // Report errors on unused parameters.
+    "noUnusedLocals": false, // Report errors on unused locals.
+    "noUnusedParameters": false, // Report errors on unused parameters.
     "noImplicitReturns": true, // Report error when not all code paths in function return a value.
     "noFallthroughCasesInSwitch": true // Report errors for fallthrough cases in switch statement.
   },
