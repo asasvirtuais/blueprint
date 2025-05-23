@@ -1,5 +1,5 @@
 {
-  "name": "blueprint",
+  "name": "asasvirtuais-blueprint",
   "version": "1.0.0",
   "scripts": {
     "dev": "next dev"
