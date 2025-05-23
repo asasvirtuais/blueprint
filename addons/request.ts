@@ -34,7 +34,7 @@ export const requestAddon = (): Addon<RequestAddon> => ({
                     description: `${currentBP.description || 'Unnamed'} (request)`,
                 })
                 
-                return newBP.setImplementation(async (props: RequestProps) => {
+                return newBP.implement(async (props: RequestProps) => {
                     // Build URL with query params if provided
                     let fetchUrl = props.url || url
                     if (props.query) {

@@ -3,7 +3,7 @@ import { Blueprint, blueprint, Addon } from '../index'
 import { z } from 'zod'
 
 export interface NextAddon {
-    route<T extends NextAddon, Props, Result>(this: T & Blueprint<Props, Result, (props: Props) => Promise<Result>, T>): this
+    route<T extends NextAddon, Props, Result>(this: T & Blueprint<Props, Promise<Result>, (props: Props) => Promise<Result>, T>): this
 }
 
 export const nextAddon: Addon<NextAddon> = {
@@ -13,15 +13,14 @@ export const nextAddon: Addon<NextAddon> = {
             
             // Create new Blueprint that takes NextRequest as props
             const routeBP = originalBP.mod(currentBP => {
-                return blueprint<NextRequest, NextResponse>({
+                return blueprint<NextRequest, Promise<NextResponse>>({
                     propsSchema: z.custom<NextRequest>((val) => val instanceof NextRequest),
-                    resultSchema: z.custom<NextResponse>((val) => val instanceof NextResponse),
+                    resultSchema: z.custom<Promise<NextResponse>>((val) => val instanceof Promise),
                     description: `${currentBP.description || 'Unnamed'} (Next.js route)`
-                }).setImplementation(async (request: NextRequest): Promise<NextResponse> => {
+                }).implement(async (request: NextRequest): Promise<NextResponse> => {
                     try {
                         // Extract all the messy props from NextRequest
                         const url = request.nextUrl
-                        // @ts-expect-error
                         const queryParams = Object.fromEntries(url.searchParams.entries())
                         
                         // Extract route params (would need actual route matching logic)
