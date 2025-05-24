@@ -1,8 +1,12 @@
 {
   "name": "asasvirtuais-blueprint",
-  "version": "1.0.0",
+  "version": "1.0.2-development",
   "scripts": {
     "dev": "next dev"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./addons/*": "./addons/*.ts"
   },
   "keywords": [],
   "author": "",
