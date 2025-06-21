@@ -1,19 +1,13 @@
 {
   "compilerOptions": {
-    "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo",
-    "target": "ESNext",
-    "module": "ESNext",
-    "lib": [
-      "ES2020",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "target": "esnext",
+    "module": "esnext",
+    "lib": ["ESNext", "DOM"],
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "allowSyntheticDefaultImports": true,
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "isolatedModules": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
@@ -22,19 +16,18 @@
     "skipLibCheck": true,
     "strictNullChecks": true,
     "forceConsistentCasingInFileNames": true,
-    "composite": true,
     "outDir": "./dist",
-    "rootDir": ".",
+    "rootDir": "./src",
     "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    "types": [],
+    "jsx": "preserve",
+    "incremental": true
   },
   "include": [
-    "src",
+    "src"
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
   ]
 }

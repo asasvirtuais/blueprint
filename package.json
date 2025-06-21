@@ -1,15 +1,16 @@
 {
   "name": "asasvirtuais-blueprint",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "scripts": {
     "build": "tsc"
   },
   "exports": {
-    ".": "./src/index.ts"
+    "./*": "./dist/*",
+    "./src/*": "./src/*"
   },
   "dependencies": {
-    "zod": "^3.25.20"
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "typescript": "^5.8.3"
