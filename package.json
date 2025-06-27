@@ -1,10 +1,11 @@
 {
   "name": "asasvirtuais-blueprint",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "type": "module",
   "scripts": {},
   "files": ["src"],
   "exports": {
+    ".": "./src/index.ts",
     "./*": "./src/*"
   },
   "dependencies": {
